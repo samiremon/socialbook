@@ -27,13 +27,59 @@ if (File.Exists(envPath))
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Helper to build a reliable PostgreSQL connection string on Render / Cloud
+string BuildConnectionString(IConfiguration config)
+{
+    var raw = Environment.GetEnvironmentVariable("DATABASE_URL")
+        ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+        ?? config.GetConnectionString("DefaultConnection")
+        ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(raw))
+    {
+        return raw;
+    }
+
+    // Convert postgres:// or postgresql:// URL (e.g. Render DATABASE_URL) to ADO.NET format
+    if (raw.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) || 
+        raw.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        try
+        {
+            var uri = new Uri(raw);
+            var userInfo = uri.UserInfo.Split(':');
+            var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : "";
+            var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
+            var host = uri.Host;
+            var port = uri.Port > 0 ? uri.Port : 5432;
+            var database = uri.AbsolutePath.TrimStart('/');
+
+            return $"Host={host};Port={port};Database={database};Username={username};Password={password};Ssl Mode=Require;Trust Server Certificate=true";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Database URL Parsing Warning] {ex.Message}");
+        }
+    }
+
+    // Ensure Trust Server Certificate=true is present for cloud PostgreSQL SSL validation
+    if (!raw.Contains("Trust Server Certificate", StringComparison.OrdinalIgnoreCase))
+    {
+        raw = raw.TrimEnd(';') + ";Trust Server Certificate=true";
+    }
+
+    return raw;
+}
+
+var dbConnectionString = BuildConnectionString(builder.Configuration);
+
 // Register Email Service
 builder.Services.AddScoped<IEmailService, EmailService>();
 
 // 1. Register PostgreSQL DbContext
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
+        dbConnectionString,
         npgsqlOptions => npgsqlOptions.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery)
     ));
 
@@ -109,12 +155,38 @@ using (var scope = app.Services.CreateScope())
     try
     {
         dbContext.Database.Migrate();
+        Console.WriteLine("[Database Connection] Database migrated and ready.");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[Database Migration Notice] {ex.Message}");
+        Console.WriteLine($"[Database Connection ERROR] {ex.Message}");
     }
 }
+
+// 0. Global Error Handling & Diagnostic Middleware
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[UNHANDLED EXCEPTION] {context.Request.Method} {context.Request.Path}: {ex}");
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            var errorPayload = new
+            {
+                message = "An error occurred while processing your request.",
+                error = ex.Message,
+                detail = ex.InnerException?.Message ?? ex.Message
+            };
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(errorPayload));
+        }
+    }
+});
 
 // 1. Support reverse proxy headers (Render / Cloudflare)
 app.UseForwardedHeaders(new ForwardedHeadersOptions
