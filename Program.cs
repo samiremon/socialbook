@@ -35,9 +35,13 @@ string BuildConnectionString(IConfiguration config)
         ?? config.GetConnectionString("DefaultConnection")
         ?? string.Empty;
 
-    if (string.IsNullOrWhiteSpace(raw))
+    const string RenderPostgresConnection = "Host=dpg-dafsb5dg1s2s73fvlm9g-a.oregon-postgres.render.com;Port=5432;Database=social_db_4nsd;Username=social_db_4nsd_user;Password=zVc1XWKKWrqyP5WsSaZ2Z7HM4Yie2leE;Ssl Mode=Require;Trust Server Certificate=true";
+
+    // If an old environment variable points to expired Neon.tech, override with new Render database
+    if (raw.Contains("neon.tech", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(raw))
     {
-        return raw;
+        Console.WriteLine("[Database Connection Notice] Bypassing expired Neon.tech database from environment variable; using Render PostgreSQL database.");
+        return RenderPostgresConnection;
     }
 
     // Convert postgres:// or postgresql:// URL (e.g. Render DATABASE_URL) to ADO.NET format
