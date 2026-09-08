@@ -55,7 +55,10 @@ public class AuthController : ControllerBase
                 id = user.Id,
                 username = user.Username,
                 fullName = user.FullName,
-                email = user.Email
+                email = user.Email,
+                isEmailVerified = user.IsEmailVerified,
+                avatarUrl = user.AvatarUrl,
+                bio = user.Bio
             }
         });
     }
@@ -63,8 +66,12 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
+        var input = dto.EmailOrUsername?.Trim() ?? string.Empty;
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Username == dto.EmailOrUsername || u.Email == dto.EmailOrUsername);
+            .Include(u => u.AdditionalEmails)
+            .FirstOrDefaultAsync(u => u.Username.ToLower() == input.ToLower() 
+                                   || u.Email.ToLower() == input.ToLower() 
+                                   || u.AdditionalEmails.Any(e => e.Email.ToLower() == input.ToLower() && e.IsVerified));
 
         if (user == null || !VerifyPasswordHash(dto.Password, user.PasswordHash))
         {
@@ -82,7 +89,10 @@ public class AuthController : ControllerBase
                 id = user.Id,
                 username = user.Username,
                 fullName = user.FullName,
-                email = user.Email
+                email = user.Email,
+                isEmailVerified = user.IsEmailVerified,
+                avatarUrl = user.AvatarUrl,
+                bio = user.Bio
             }
         });
     }

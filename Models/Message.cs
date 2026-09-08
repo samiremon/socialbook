@@ -11,4 +11,6 @@ public class Message
 
     public int ReceiverId { get; set; }
     public User Receiver { get; set; } = null!;
+
+    public bool IsRead { get; set; } = false;
 }
