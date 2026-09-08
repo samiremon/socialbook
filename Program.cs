@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -115,17 +116,21 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// 1. Support reverse proxy headers (Render / Cloudflare)
+app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(); // This enables the visual webpage at /swagger
-}
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
 
-if (!app.Environment.IsDevelopment())
+// 2. Enable Swagger across all environments (including production/Render)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseHttpsRedirection();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "SocialBook API v1");
+});
+
+// 3. Redirect root "/" directly to Swagger UI
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.UseCors("AllowAll");
 
